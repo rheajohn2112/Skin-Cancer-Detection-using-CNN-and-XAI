@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skin Cancer Detection</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="root">
+    <h1>Skin Cancer Detection</h1>
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="fileInput">Upload an Image:</label>
+        <input type="file" id="fileInput" name="file1" required />
+      </div>
+      <button type="submit">Upload</button>
+    </form>
+
+    {% if prediction %}
+      <div class="success" id="feedback">
+        {{ prediction  }}
+        {% if prediction[-1] == '0' %}
+          [Cancer]
+        {% else %}
+          [Lesion]
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if gradcam_image %}
+      <h2>Grad-CAM Visualization</h2>
+      <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image"/>
+    {% endif %}
+
+    {% if file_path %}
+      <h2>Original Image</h2>
+      <img src="{{ file_path }}" alt="Original Image" class="og-image" height="150px" width="150px"/>
+    {% endif %}
+
+    {% if error %}
+      <div class="error" id="feedback">{{ error }}</div>
+    {% endif %}
+  </div>
+</body>
+</html>

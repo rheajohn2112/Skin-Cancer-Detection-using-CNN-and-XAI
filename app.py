@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, send_file
+from flask import Flask, request, redirect, url_for, send_from_directory, render_template
 import os
 import torch
 from torchvision import transforms
@@ -7,13 +7,13 @@ import torch.nn as nn
 import numpy as np
 import cv2
 import torch.nn.functional as F
+from flask_cors import CORS
 
-# Paths
 UPLOAD_FOLDER = './uploads'
 MODEL_PATH = './trained_cnn_model_sgd.pth'
 
-# Flask App Initialization
 app = Flask(__name__)
+CORS(app)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Define the CNN Model Architecture
@@ -75,7 +75,7 @@ class ConvNet(nn.Module):
         return x
 
 # Load the Model
-num_classes = 2  # Update based on your dataset
+num_classes = 2  # No. of classes in the dataset
 model = ConvNet(num_classes=num_classes)
 model.load_state_dict(torch.load(MODEL_PATH))
 model.eval()
@@ -98,6 +98,7 @@ def generate_gradcam(model, input_tensor, target_layer, target_class=None):
     gradients = []
     activations = []
 
+    #Hooks are for analyzing the thought process
     def backward_hook(module, grad_input, grad_output):
         gradients.append(grad_output[0])
 
@@ -109,9 +110,10 @@ def generate_gradcam(model, input_tensor, target_layer, target_class=None):
 
     output = model(input_tensor)
     if target_class is None:
-        target_class = torch.argmax(output, dim=1).item()
+        target_class = torch.argmax(output, dim=1).item()       #Use class with highest probability
     loss = output[0, target_class]
 
+    #Clear gradients
     model.zero_grad()
     loss.backward()
 
@@ -123,16 +125,17 @@ def generate_gradcam(model, input_tensor, target_layer, target_class=None):
 
     weights = gradients.mean(dim=(2, 3), keepdim=True)
     gradcam = (weights * activations).sum(dim=1, keepdim=True)
-    gradcam = F.relu(gradcam)
-    gradcam = gradcam.squeeze().cpu().numpy()
+    gradcam = F.relu(gradcam)       #Ensures highlighting of contributing regions
+    gradcam = gradcam.squeeze().cpu().numpy()       #Conversion to array
+    #Normalizing values to 0, 1
     gradcam -= gradcam.min()
     gradcam /= gradcam.max()
     gradcam = cv2.resize(gradcam, (input_tensor.shape[2], input_tensor.shape[3]))
 
     return gradcam, target_class
 
-@app.route('/gradcam', methods=['POST'])
-def gradcam():
+#@app.route('/gradcam', methods=['POST'])
+#def gradcam():  
     if 'file1' not in request.files:
         return 'No file uploaded'
     file = request.files['file1']
@@ -156,35 +159,55 @@ def gradcam():
 
     return send_file(result_path, mimetype='image/png')
 
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
 @app.route('/upload', methods=['POST'])
 def upload():
     if 'file1' not in request.files:
         return 'No file uploaded'
+    
     file = request.files['file1']
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(file_path)
 
-    # Preprocess the image and predict
-    input_tensor = preprocess_image(file_path)
-    output = model(input_tensor)
-    predicted_class = torch.argmax(output, dim=1).item()
+    try:
+        # Preprocess the image and predict
+        input_tensor = preprocess_image(file_path)
+        output = model(input_tensor)
+        predicted_class = torch.argmax(output, dim=1).item()
 
-    return f'Predicted class: {predicted_class}'
+        # Generate Grad-CAM visualization
+        target_layer = model.conv7  # Use the final layer
+        gradcam, _ = generate_gradcam(model, input_tensor, target_layer)
+
+        # Save the Grad-CAM image
+        gradcam_img = np.uint8(255 * gradcam)   #Expanding ranges of values
+        heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)      #Apply blur, green, yellow, red
+        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      #Convert to RGB
+
+        img = Image.open(file_path).resize((150, 150))  
+        img_np = np.array(img)      #convert image to 2D array for computation
+        overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
+
+        result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
+        Image.fromarray(overlay).save(result_path)
+        gradcam_url = result_path.replace("\\", "/")
+
+        return render_template('index.html', 
+                               prediction=f'Predicted class: {predicted_class}', 
+                               gradcam_image=gradcam_url,
+                               file_path=file_path)
+    
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
+
 
 
 @app.route('/')
 def home():
-    return '''
-    <h1>Skin Cancer Detection App</h1>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file1">
-        <input type="submit" value="Predict">
-    </form>
-    <form action="/gradcam" method="post" enctype="multipart/form-data">
-        <input type="file" name="file1">
-        <input type="submit" value="Generate Grad-CAM">
-    </form>
-    '''
+    return render_template('index.html')
 
 if __name__ == '__main__':
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
