@@ -5,14 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Skin Cancer Detection</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
 </head>
 <body>
   <div id="root">
+    <img src="{{ url_for('static', filename='no_bg.png') }}" class="logo">
     <h1>Skin Cancer Detection</h1>
     <form action="/upload" method="POST" enctype="multipart/form-data">
       <div class="form-group">
-        <label for="fileInput">Upload an Image:</label>
-        <input type="file" id="fileInput" name="file1" required />
+        <label for="fileInput">Upload an Image : </label>
+        <label class="custom-file-upload" >
+          <input type="file" id="fileInput" name="file1" required />
+          Choose
+        </label>
+      </div>
+      <div id="preview-section" style="display: none; margin-top: 15px; margin-bottom: 15px;">
+        <h3>Image Preview:</h3>
+        <img id="imagePreview" src="" alt="Image Preview" style="max-width: 50%; border: 1px solid #ccc; border-radius: 8px; height: 250px; width: 250px;" />
       </div>
       <button type="submit">Upload</button>
     </form>
@@ -35,7 +44,7 @@
 
     {% if file_path %}
       <h2>Original Image</h2>
-      <img src="{{ file_path }}" alt="Original Image" class="og-image" height="150px" width="150px"/>
+      <img src="{{ file_path }}" alt="Original Image" class="og-image" height="200px" width="200px"/>
     {% endif %}
 
     {% if error %}
@@ -43,4 +52,21 @@
     {% endif %}
   </div>
 </body>
+
+<script>
+  document.getElementById('fileInput').addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const previewSection = document.getElementById('preview-section');
+        const imagePreview = document.getElementById('imagePreview');
+        imagePreview.src = e.target.result;
+        previewSection.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+</script>
+
 </html>

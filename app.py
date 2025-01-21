@@ -125,7 +125,7 @@ def generate_gradcam(model, input_tensor, target_layer, target_class=None):
 
     weights = gradients.mean(dim=(2, 3), keepdim=True)
     gradcam = (weights * activations).sum(dim=1, keepdim=True)
-    gradcam = F.relu(gradcam)       #Ensures highlighting of contributing regions
+    gradcam = F.relu(gradcam)       #Ensures the highlighting of contributing regions
     gradcam = gradcam.squeeze().cpu().numpy()       #Conversion to array
     #Normalizing values to 0, 1
     gradcam -= gradcam.min()
@@ -183,12 +183,12 @@ def upload():
         gradcam, _ = generate_gradcam(model, input_tensor, target_layer)
 
         # Save the Grad-CAM image
-        gradcam_img = np.uint8(255 * gradcam)   #Expanding ranges of values
-        heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)      #Apply blur, green, yellow, red
+        gradcam_img = np.uint8(255 * gradcam)   #Expanding the ranges of values
+        heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)      #Apply blue, green, yellow, red
         heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      #Convert to RGB
 
         img = Image.open(file_path).resize((150, 150))  
-        img_np = np.array(img)      #convert image to 2D array for computation
+        img_np = np.array(img)      #Convert image to 2D array for computation
         overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
 
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
@@ -202,7 +202,6 @@ def upload():
     
     except Exception as e:
         return f"An error occurred: {str(e)}"
-
 
 
 @app.route('/')
