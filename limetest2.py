@@ -85,7 +85,7 @@ transformer = transforms.Compose([
 ])
 
 # Load a sample image for explanation
-img_path = "C:/Users/rohan/Downloads/Cancer-1.jpg"
+img_path = "C:/Users/rohan/Downloads/Lesion-1.jpg"
 img = Image.open(img_path).convert('RGB')
 input_tensor = transformer(img).unsqueeze(0).to(device)
 

@@ -101,5 +101,5 @@ def explain_image(image_path, model):
     shap.image_plot([shap_values], input_image)
 
 # Example usage
-example_image_path = "C:/Users/rohan/Downloads/Cancer-1.jpg"
+example_image_path = "C:/Users/rohan/Downloads/Lesion-1.jpg"
 explain_image(example_image_path, model)
