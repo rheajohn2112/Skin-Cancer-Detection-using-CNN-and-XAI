@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, send_from_directory, render_template
+from flask import Flask, request, redirect, flash, send_from_directory, render_template
 import os
 import torch
 from torchvision import transforms
@@ -7,14 +7,13 @@ import torch.nn as nn
 import numpy as np
 import cv2
 import torch.nn.functional as F
-from flask_cors import CORS
 
 UPLOAD_FOLDER = './uploads'
 MODEL_PATH = './trained_cnn_model_sgd.pth'
 
 app = Flask(__name__)
-CORS(app)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.secret_key="Hello World"
 
 # Define the CNN Model Architecture
 class ConvNet(nn.Module):
@@ -165,8 +164,9 @@ def uploaded_file(filename):
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    if 'file1' not in request.files:
-        return 'No file uploaded'
+    if 'file1' not in request.files or request.files['file1'].filename == '':
+        flash("Please upload a file!", "warning")
+        return redirect('/')
     
     file = request.files['file1']
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
