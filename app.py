@@ -134,44 +134,7 @@ def generate_gradcam(model, input_tensor, target_layer, target_class=None):
     return gradcam, target_class
 
 #@app.route('/gradcam', methods=['POST'])
-#def gradcam():  
-    if 'file1' not in request.files:
-        return 'No file uploaded'
-    file = request.files['file1']
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
-
-    input_tensor = preprocess_image(file_path)
-    target_layer = model.conv7  # Replace with the layer you want to use
-    gradcam, predicted_class = generate_gradcam(model, input_tensor, target_layer)
-
-    gradcam_img = np.uint8(255 * gradcam)
-    heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)
-    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-
-    img = Image.open(file_path).resize((150, 150))
-    img_np = np.array(img)
-    overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
-
-    result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
-    Image.fromarray(overlay).save(result_path)
-
-    return send_file(result_path, mimetype='image/png')
-
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-@app.route('/upload', methods=['POST'])
-def upload():
-    if 'file1' not in request.files or request.files['file1'].filename == '':
-        flash("Please upload a file!", "warning")
-        return redirect('/')
-    
-    file = request.files['file1']
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(file_path)
-
+def gradcam(file, file_path):  
     try:
         # Preprocess the image and predict
         input_tensor = preprocess_image(file_path)
@@ -194,14 +157,52 @@ def upload():
         result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
         Image.fromarray(overlay).save(result_path)
         gradcam_url = result_path.replace("\\", "/")
-
-        return render_template('index.html', 
-                               prediction=f'Predicted class: {predicted_class}', 
-                               gradcam_image=gradcam_url,
-                               file_path=file_path)
+        return predicted_class, gradcam_url
     
     except Exception as e:
         return f"An error occurred: {str(e)}"
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'file1' not in request.files or request.files['file1'].filename == '':
+        flash("Please upload a file!", "warning")
+        return redirect('/')
+    
+    file = request.files['file1']
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(file_path)
+
+    # try:
+    #     # Preprocess the image and predict
+    #     input_tensor = preprocess_image(file_path)
+    #     output = model(input_tensor)
+    #     predicted_class = torch.argmax(output, dim=1).item()
+
+    #     # Generate Grad-CAM visualization
+    #     target_layer = model.conv7  # Use the final layer
+    #     gradcam, _ = generate_gradcam(model, input_tensor, target_layer)
+
+    #     # Save the Grad-CAM image
+    #     gradcam_img = np.uint8(255 * gradcam)   #Expanding the ranges of values
+    #     heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)      #Apply blue, green, yellow, red
+    #     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      #Convert to RGB
+
+    #     img = Image.open(file_path).resize((150, 150))  
+    #     img_np = np.array(img)      #Convert image to 2D array for computation
+    #     overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
+
+    #     result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
+    #     Image.fromarray(overlay).save(result_path)
+    #     gradcam_url = result_path.replace("\\", "/")
+    predicted_class, gradcam_url = gradcam(file, file_path)
+    return render_template('index.html', 
+                        prediction=f'Predicted class: {predicted_class}', 
+                        gradcam_image=gradcam_url,
+                        file_path=file_path)
 
 
 @app.route('/')
