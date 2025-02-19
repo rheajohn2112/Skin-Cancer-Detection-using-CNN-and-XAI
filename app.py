@@ -7,6 +7,10 @@ import torch.nn as nn
 import numpy as np
 import cv2
 import torch.nn.functional as F
+from lime.lime_image import LimeImageExplainer
+from sklearn.cluster import KMeans
+import shap
+import matplotlib.pyplot as plt
 
 UPLOAD_FOLDER = './uploads'
 MODEL_PATH = './trained_cnn_model_sgd.pth'
@@ -81,7 +85,8 @@ model.eval()
 
 # Define Image Transformations
 transformer = transforms.Compose([
-    transforms.Resize((150, 150)),
+    transforms.ToPILImage(),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 ])
@@ -90,77 +95,93 @@ def preprocess_image(image_path):
     image = Image.open(image_path).convert('RGB')
     return transformer(image).unsqueeze(0)
 
-# Grad-CAM Implementation
-def generate_gradcam(model, input_tensor, target_layer, target_class=None):
-    model.eval()
+def normalize_heatmap(heatmap):
+    heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+    return np.uint8(255 * heatmap)
+
+def lime(file_path):
+    image = cv2.imread(file_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = cv2.resize(image, (150, 150))  
     
-    gradients = []
-    activations = []
+    explainer = LimeImageExplainer()
+    def predict_fn(images):
+        images = torch.stack([transformer(img) for img in images])
+        return model(images).detach().cpu().numpy()
+    
+    explanation = explainer.explain_instance(image, predict_fn, top_labels=1, hide_color=0, num_samples=1000)
+    return normalize_heatmap(explanation.get_image_and_mask(explanation.top_labels[0])[1])
 
-    #Hooks are for analyzing the thought process
-    def backward_hook(module, grad_input, grad_output):
-        gradients.append(grad_output[0])
+def shap_gen(file_path):
+    image = cv2.imread(file_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = cv2.resize(image, (150, 150)) 
+     
+    background = torch.randn((10, 3, 224, 224))
+    image_tensor = transformer(image).unsqueeze(0)
+    
+    explainer = shap.DeepExplainer(model, background)
+    shap_values = explainer.shap_values(image_tensor)
+    
+    shap_values = np.array(shap_values[0])  # Use the SHAP values for the first class
+    input_image = image_tensor.cpu().numpy().transpose(0, 2, 3, 1)[0]  # Convert to NHWC format
+    shap_image = shap_values[0]
+    
+    # Sum across channels to match image dimensions
+    shap_sum = np.sum(shap_image, axis=-1)
+    
+    # Normalize SHAP values to enhance contrast
+    shap_sum = (shap_sum - np.min(shap_sum)) / (np.max(shap_sum) - np.min(shap_sum))  # Normalize to [0, 1]
+    shap_sum = shap_sum * 2 - 1  # Scale to [-1, 1] for a balanced red-blue colormap
+    shap_sum[np.abs(shap_sum) < 0.05] = 0  # Filter out low SHAP values below threshold
 
+    # Lighten the input image for better visibility
+    lightened_image = np.clip(input_image * 0.7 + 0.3, 0, 1)
+
+    base_name = os.path.basename(file_path)
+    name, ext = os.path.splitext(base_name)
+    output_filename = f"shap_explanation_{name}.png"
+    output_path = os.path.join(UPLOAD_FOLDER, output_filename)
+
+    # Plot and save the SHAP explanation
+    plt.figure(figsize=(8, 6))
+    plt.imshow(lightened_image)
+    plt.imshow(shap_sum, cmap='bwr', alpha=0.6)  # Increased alpha for better visibility
+    plt.colorbar(label="Normalized SHAP value")
+    plt.title("SHAP Explanation (Enhanced Contrast)")
+    plt.axis('off')
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+    return output_path
+
+def gradcam(file_path, target_layer):
+    image = cv2.imread(file_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = cv2.resize(image, (150, 150))  
+    
+    image_tensor = transformer(image).unsqueeze(0)
+    activations, gradients = {}, {}
+
+    #Hooks for analyzing the thought process
     def forward_hook(module, input, output):
-        activations.append(output)
+        activations['value'] = output
 
-    handle_backward = target_layer.register_backward_hook(backward_hook)
-    handle_forward = target_layer.register_forward_hook(forward_hook)
+    def backward_hook(module, grad_input, grad_output):
+        gradients['value'] = grad_output[0]
 
-    output = model(input_tensor)
-    if target_class is None:
-        target_class = torch.argmax(output, dim=1).item()       #Use class with highest probability
-    loss = output[0, target_class]
-
-    #Clear gradients
-    model.zero_grad()
-    loss.backward()
-
-    handle_backward.remove()
-    handle_forward.remove()
-
-    gradients = gradients[0].detach()
-    activations = activations[0].detach()
-
-    weights = gradients.mean(dim=(2, 3), keepdim=True)
-    gradcam = (weights * activations).sum(dim=1, keepdim=True)
-    gradcam = F.relu(gradcam)       #Ensures the highlighting of contributing regions
-    gradcam = gradcam.squeeze().cpu().numpy()       #Conversion to array
-    #Normalizing values to 0, 1
-    gradcam -= gradcam.min()
-    gradcam /= gradcam.max()
-    gradcam = cv2.resize(gradcam, (input_tensor.shape[2], input_tensor.shape[3]))
-
-    return gradcam, target_class
-
-#@app.route('/gradcam', methods=['POST'])
-def gradcam(file, file_path):  
-    try:
-        # Preprocess the image and predict
-        input_tensor = preprocess_image(file_path)
-        output = model(input_tensor)
-        predicted_class = torch.argmax(output, dim=1).item()
-
-        # Generate Grad-CAM visualization
-        target_layer = model.conv7  # Use the final layer
-        gradcam, _ = generate_gradcam(model, input_tensor, target_layer)
-
-        # Save the Grad-CAM image
-        gradcam_img = np.uint8(255 * gradcam)   #Expanding the ranges of values
-        heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)      #Apply blue, green, yellow, red
-        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      #Convert to RGB
-
-        img = Image.open(file_path).resize((150, 150))  
-        img_np = np.array(img)      #Convert image to 2D array for computation
-        overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
-
-        result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
-        Image.fromarray(overlay).save(result_path)
-        gradcam_url = result_path.replace("\\", "/")
-        return predicted_class, gradcam_url
+    handle1 = target_layer.register_forward_hook(forward_hook)
+    handle2 = target_layer.register_full_backward_hook(backward_hook)
     
-    except Exception as e:
-        return f"An error occurred: {str(e)}"
+    output = model(image_tensor)
+    target_class = torch.argmax(output, dim=1).item()
+    output[:, target_class].backward()
+    
+    handle1.remove()
+    handle2.remove()
+    
+    grad = gradients['value'].mean(dim=[2, 3], keepdim=True)
+    cam = F.relu(grad * activations['value']).sum(dim=1).squeeze().detach().cpu().numpy()
+    return target_class, normalize_heatmap(cv2.resize(cam, (150, 150)))
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
@@ -171,39 +192,52 @@ def upload():
     if 'file1' not in request.files or request.files['file1'].filename == '':
         flash("Please upload a file!", "warning")
         return redirect('/')
-    
+
     file = request.files['file1']
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file_path = file_path.replace("\\", "/")
     file.save(file_path)
+    print(file_path)
 
-    # try:
-    #     # Preprocess the image and predict
-    #     input_tensor = preprocess_image(file_path)
-    #     output = model(input_tensor)
-    #     predicted_class = torch.argmax(output, dim=1).item()
+    try:
+        target_layer = model.conv7  # Use the final layer
+        predicted_class, gradcam_heatmap = gradcam(file_path, target_layer)     
+        lime_heatmap = lime(file_path)
+        shap_path = shap_gen(file_path)
+        
+        # Open and resize the original image
+        img = Image.open(file_path).resize((224, 224))  
+        img_np = np.array(img)      
 
-    #     # Generate Grad-CAM visualization
-    #     target_layer = model.conv7  # Use the final layer
-    #     gradcam, _ = generate_gradcam(model, input_tensor, target_layer)
+        # Ensure heatmap has 3 channels and matches image size
+        gradcam_heatmap = cv2.applyColorMap(gradcam_heatmap, cv2.COLORMAP_JET)
+        gradcam_heatmap = cv2.cvtColor(gradcam_heatmap, cv2.COLOR_BGR2RGB) 
+        gradcam_heatmap = cv2.resize(gradcam_heatmap, img_np.shape[:2][::-1])  
 
-    #     # Save the Grad-CAM image
-    #     gradcam_img = np.uint8(255 * gradcam)   #Expanding the ranges of values
-    #     heatmap = cv2.applyColorMap(gradcam_img, cv2.COLORMAP_JET)      #Apply blue, green, yellow, red
-    #     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)      #Convert to RGB
+        lime_heatmap = cv2.applyColorMap(lime_heatmap, cv2.COLORMAP_JET)
+        lime_heatmap = cv2.cvtColor(lime_heatmap, cv2.COLOR_BGR2RGB) 
+        lime_heatmap = cv2.resize(lime_heatmap, img_np.shape[:2][::-1]) 
+         
+        # Create overlay
+        overlay = cv2.addWeighted(img_np, 0.5, gradcam_heatmap, 0.5, 0)
+        overlay2 = cv2.addWeighted(img_np, 0.5, lime_heatmap, 0.5, 0)
 
-    #     img = Image.open(file_path).resize((150, 150))  
-    #     img_np = np.array(img)      #Convert image to 2D array for computation
-    #     overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
+        # Save and render the Grad-CAM result
+        gradcam_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
+        lime_path = os.path.join(app.config['UPLOAD_FOLDER'], f"lime_{file.filename}")
 
-    #     result_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
-    #     Image.fromarray(overlay).save(result_path)
-    #     gradcam_url = result_path.replace("\\", "/")
-    predicted_class, gradcam_url = gradcam(file, file_path)
-    return render_template('index.html', 
-                        prediction=f'Predicted class: {predicted_class}', 
-                        gradcam_image=gradcam_url,
-                        file_path=file_path)
+        Image.fromarray(overlay).save(gradcam_path)
+        Image.fromarray(overlay2).save(lime_path)
+        
+        return render_template('index.html', 
+                               prediction=f'Predicted class: {predicted_class}', 
+                               gradcam_image=gradcam_path,
+                               lime_image=lime_path,
+                               shap_image=shap_path,
+                               file_path=file_path)
 
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
 
 @app.route('/')
 def home():

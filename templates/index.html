@@ -57,6 +57,16 @@
       <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image"/>
     {% endif %}
 
+    {% if lime_image %}
+      <h2>LIME Visualization</h2>
+      <img src="{{ lime_image }}" alt="LIME Result" class="gradcam-image"/>
+    {% endif %}
+
+    {% if shap_image %}
+      <h2>SHAP Visualization</h2>
+      <img src="{{ shap_image }}" alt="SHAP Result" class="gradcam-image"/>
+    {% endif %}
+
     {% if file_path %}
       <h2>Original Image</h2>
       <img src="{{ file_path }}" alt="Original Image" class="og-image" height="200px" width="200px"/>
@@ -85,6 +95,7 @@
       reader.readAsDataURL(file);
     }
   });
+
 </script>
 
 </html>
