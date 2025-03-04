@@ -6,96 +6,207 @@
   <title>Skin Cancer Detection</title>
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.1.3/dist/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <style>
+    body {
+      min-height: 100vh;
+      background: linear-gradient(to bottom, #f8f9fa, #d4b896);
+      overflow-y: auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      max-width: 500px;
+      text-align: center;
+      min-height: 300px; /* Set minimum height */
+      transition: all 0.5s ease-in-out;
+    }
+    
+    .logo {
+      width: 120px;
+      margin-bottom: 15px;
+    }
+    .custom-file-upload {
+      background-color: #007bff;
+      color: white;
+      padding: 10px 15px;
+      border-radius: 5px;
+      display: inline-block;
+      cursor: pointer;
+      margin-bottom: 15px;
+    }
+    .custom-file-upload:hover {
+      background-color: #0056b3;
+    }
+    button {
+      background-color: #28a745;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 5px;
+      width: 100%;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #218838;
+    }
+  </style>
 </head>
 <body>
-  <div id="root">
-    <img src="{{ url_for('static', filename='no_bg.png') }}" class="logo">
-    <h1>Skin Cancer Detection</h1>
+
+  <div id="root" class="container">
+    <a href="/">
+      <img src="{{ url_for('static', filename='no_bg.png') }}" class="logo rounded-circle">
+    </a>
+    <h2>Skin Cancer Detection</h2>
     <form action="/upload" method="POST" enctype="multipart/form-data">
       <div class="form-group">
-        <label for="fileInput">Upload an Image : </label>
-        <label class="custom-file-upload" >
-          <input type="file" id="fileInput" name="file1" />
-          Choose
+        <label for="fileInput" class="custom-file-upload">
+          <input type="file" id="fileInput" name="file1" hidden />
+          <i class="fas fa-upload"></i> Choose Image
         </label>
       </div>
-
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            <div class="container mt-3">
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
-                {% endfor %}
-            </div>
+          <div class="mt-3">
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            {% endfor %}
+          </div>
         {% endif %}
       {% endwith %}
 
-      <div id="preview-section" style="display: none; margin-top: 15px; margin-bottom: 15px;">
-        <h3>Image Preview:</h3>
-        <img id="imagePreview" src="" alt="Image Preview" style="max-width: 50%; border: 1px solid #ccc; border-radius: 8px; height: 250px; width: 250px;" />
+      <div id="preview-section" style="
+          opacity: 0;
+          max-height: 0px;
+          overflow: hidden;
+          transition: opacity 0.5s ease-in-out, max-height 0.5s ease-in-out;
+          margin-top: 15px;"
+      >
+        <h5>Image Preview:</h5>
+        <img id="imagePreview" src="" alt="Image Preview" class="gradcam-image" />
       </div>
-      <button type="submit">Upload</button>
+
+      <br>
+      <button type="submit" id="upload-btn" onclick="startProgressBar(event)">Upload</button>
     </form>
 
+  <progress id="progress-bar" value="0" max="100" style="width: 100%; display: none;"></progress>
+
     {% if prediction %}
-      <div class="success" id="feedback">
-        {{ prediction  }}
-        {% if prediction[-1] == '0' %}
-          [Cancer]
-        {% else %}
-          [Lesion]
-        {% endif %}
+      <div class="alert alert-success mt-3" id="feedback">
+        {{ prediction  }} {% if prediction[-1] == '0' %} [Cancer] {% else %} [Lesion] {% endif %}
       </div>
     {% endif %}
-
     {% if gradcam_image %}
-      <h2>Grad-CAM Visualization</h2>
-      <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image"/>
+      <h4 class="mt-3">Grad-CAM Visualization</h4>
+      <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image img-fluid rounded border"/>
     {% endif %}
-
     {% if lime_image %}
-      <h2>LIME Visualization</h2>
-      <img src="{{ lime_image }}" alt="LIME Result" class="gradcam-image"/>
+      <h4 class="mt-3">LIME Visualization</h4>
+      <img src="{{ lime_image }}" alt="LIME Result" class="lime-image img-fluid rounded border"/>
     {% endif %}
-
     {% if shap_image %}
-      <h2>SHAP Visualization</h2>
-      <img src="{{ shap_image }}" alt="SHAP Result" class="gradcam-image"/>
+      <h4 class="mt-3">SHAP Visualization</h4>
+      <img src="{{ shap_image }}" alt="SHAP Result" class="shap-image img-fluid rounded border"/>
     {% endif %}
-
     {% if file_path %}
-      <h2>Original Image</h2>
-      <img src="{{ file_path }}" alt="Original Image" class="og-image" height="200px" width="200px"/>
+      <h4 class="mt-3">Original Image</h4>
+      <img src="{{ file_path }}" alt="Original Image" class="og-image img-fluid rounded border"/>
     {% endif %}
-
     {% if error %}
-      <div class="error" id="feedback">{{ error }}</div>
+      <div class="alert alert-danger mt-3" id="feedback">{{ error }}</div>
     {% endif %}
   </div>
-  <!-- Bootstrap JavaScript -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-</body>
+  <div id="imageModal" class="modal" onclick="closeModal()">
+    <span class="close">&times;</span>
+    <img class="modal-content" id="modalImg">
+  </div>
 
-<script>
-  document.getElementById('fileInput').addEventListener('change', function(event) {
-    const file = event.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const previewSection = document.getElementById('preview-section');
-        const imagePreview = document.getElementById('imagePreview');
-        imagePreview.src = e.target.result;
-        previewSection.style.display = 'block';
-      };
-      reader.readAsDataURL(file);
+  <script>
+    document.getElementById('fileInput').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const previewSection = document.getElementById('preview-section');
+          const imagePreview = document.getElementById('imagePreview');
+          imagePreview.src = e.target.result;
+          previewSection.style.opacity = "1";  
+          previewSection.style.maxHeight = "500px";
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    document.addEventListener("DOMContentLoaded", function() 
+    {
+      let uploadForm = document.querySelector("form");
+      let uploadBtn = document.querySelector("button[type='submit']");
+      let fileInput = document.getElementById("fileInput"); 
+      let progressBar = document.getElementById("progress-bar");
+  
+      uploadForm.addEventListener("submit", function() 
+      {
+          if (!fileInput.files.length) 
+          {
+              alert("Please select a file before uploading!");
+              return false; // Prevent form submission if no file is chosen
+          }
+  
+          uploadBtn.disabled = true;
+          progressBar.style.display = "block";
+  
+          let time = 0;
+          let interval = setInterval(() => {
+              time += 500; 
+              let percentage = (time / 17000) * 100;
+              progressBar.value = percentage;
+  
+              if (time >= 17000) {
+                  clearInterval(interval); // Stop progress at 100%
+              }
+          }, 500);
+  
+          let container = document.querySelector(".container");
+          container.style.transition = "all 0.5s ease-in-out"; // Smooth animation
+          container.style.minHeight = "650px";
+          return true;
+      });
+    });  
+
+    function showImageModal(imgSrc) {
+      let modal = document.getElementById("imageModal");
+      let modalImg = document.getElementById("modalImg");
+      modal.style.display = "block";
+      modalImg.src = imgSrc;
     }
-  });
+  
+    function closeModal() {
+      document.getElementById("imageModal").style.display = "none";
+    }
+  
+    document.addEventListener("DOMContentLoaded", function () {
+      let images = document.querySelectorAll(".gradcam-image, .shap-image, .lime-image"); 
+      images.forEach(img => {
+        img.style.cursor = "pointer"; 
+        img.addEventListener("click", function () {
+          showImageModal(this.src);
+        });
+      });
+    });
 
-</script>
-
+  </script>
+</body>
 </html>
