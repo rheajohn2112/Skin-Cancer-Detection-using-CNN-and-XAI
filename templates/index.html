@@ -12,11 +12,14 @@
   <style>
     body {
       min-height: 100vh;
-      background: linear-gradient(to bottom, #f8f9fa, #d4b896);
+      background: linear-gradient(to top, #f8f9fa, #d4b896);
       overflow-y: auto;
       display: flex;
       justify-content: center;
       align-items: center;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.5s ease-in;
     }
     .container {
       background: white;
@@ -25,10 +28,9 @@
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
       max-width: 500px;
       text-align: center;
-      min-height: 300px; /* Set minimum height */
+      min-height: 300px; 
       transition: all 0.5s ease-in-out;
     }
-    
     .logo {
       width: 120px;
       margin-bottom: 15px;
@@ -56,6 +58,18 @@
     }
     button:hover {
       background-color: #218838;
+    }
+
+    #progress-bar {
+      width: 100%;
+      opacity: 0;
+      transform: scale(0.8);
+      transition: opacity 0.5s ease-in-out, transform 0.5s ease-in-out;
+    }
+    
+    #progress-bar.show {
+      opacity: 1;
+      transform: scale(1);
     }
   </style>
 </head>
@@ -101,25 +115,35 @@
       <button type="submit" id="upload-btn" onclick="startProgressBar(event)">Upload</button>
     </form>
 
-  <progress id="progress-bar" value="0" max="100" style="width: 100%; display: none;"></progress>
+  <progress id="progress-bar" value="0" max="100"></progress>
 
     {% if prediction %}
       <div class="alert alert-success mt-3" id="feedback">
         {{ prediction  }} {% if prediction[-1] == '0' %} [Cancer] {% else %} [Lesion] {% endif %}
       </div>
     {% endif %}
-    {% if gradcam_image %}
-      <h4 class="mt-3">Grad-CAM Visualization</h4>
-      <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image img-fluid rounded border"/>
-    {% endif %}
-    {% if lime_image %}
-      <h4 class="mt-3">LIME Visualization</h4>
-      <img src="{{ lime_image }}" alt="LIME Result" class="lime-image img-fluid rounded border"/>
-    {% endif %}
-    {% if shap_image %}
-      <h4 class="mt-3">SHAP Visualization</h4>
-      <img src="{{ shap_image }}" alt="SHAP Result" class="shap-image img-fluid rounded border"/>
-    {% endif %}
+
+    <div class="row mt-3">
+      {% if gradcam_image %}
+        <div class="col-md-4 text-center">
+          <h5>Grad-CAM</h5>
+          <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image img-fluid rounded border"/>
+        </div>
+      {% endif %}
+      {% if lime_image %}
+        <div class="col-md-4 text-center">
+          <h5>LIME</h5>
+          <img src="{{ lime_image }}" alt="LIME Result" class="lime-image img-fluid rounded border"/>
+        </div>
+      {% endif %}
+      {% if shap_image %}
+        <div class="col-md-4 text-center">
+          <h5>SHAP</h5>
+          <img src="{{ shap_image }}" alt="SHAP Result" class="shap-image img-fluid rounded border"/>
+        </div>
+      {% endif %}
+    </div>
+
     {% if file_path %}
       <h4 class="mt-3">Original Image</h4>
       <img src="{{ file_path }}" alt="Original Image" class="og-image img-fluid rounded border"/>
@@ -135,77 +159,117 @@
   </div>
 
   <script>
-    document.getElementById('fileInput').addEventListener('change', function(event) {
-      const file = event.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          const previewSection = document.getElementById('preview-section');
-          const imagePreview = document.getElementById('imagePreview');
-          imagePreview.src = e.target.result;
-          previewSection.style.opacity = "1";  
-          previewSection.style.maxHeight = "500px";
-        };
-        reader.readAsDataURL(file);
-      }
-    });
-
-    document.addEventListener("DOMContentLoaded", function() 
+    document.addEventListener("DOMContentLoaded", function () 
     {
-      let uploadForm = document.querySelector("form");
+      let fileInput = document.getElementById('fileInput');
+      let previewSection = document.getElementById('preview-section');
+      let imagePreview = document.getElementById('imagePreview');
       let uploadBtn = document.querySelector("button[type='submit']");
-      let fileInput = document.getElementById("fileInput"); 
       let progressBar = document.getElementById("progress-bar");
-  
-      uploadForm.addEventListener("submit", function() 
-      {
-          if (!fileInput.files.length) 
-          {
-              alert("Please select a file before uploading!");
-              return false; // Prevent form submission if no file is chosen
+      let container = document.querySelector(".container");
+      
+      fileInput.addEventListener('change', function(event) {
+          const file = event.target.files[0];
+          if (file) {
+              const reader = new FileReader();
+              reader.onload = function(e) {
+                  imagePreview.src = e.target.result;
+                  previewSection.style.opacity = "1";
+                  previewSection.style.maxHeight = "500px";
+              };
+              reader.readAsDataURL(file);
+          } else {
+              // If no file is selected, hide preview section
+              previewSection.style.opacity = "0";
+              previewSection.style.maxHeight = "0px";
           }
+      });
   
+      // 📤 File upload progress animation
+      document.querySelector("form").addEventListener("submit", function(event) {
+          if (!fileInput.files.length) {
+              alert("Please select a file before uploading!");
+              event.preventDefault(); // Prevent form submission
+              return false;
+          }
+
           uploadBtn.disabled = true;
           progressBar.style.display = "block";
+          progressBar.classList.add("show");
+          //container.style.maxWidth = "900px";
   
           let time = 0;
           let interval = setInterval(() => {
-              time += 500; 
-              let percentage = (time / 17000) * 100;
+              time += 500;
+              let percentage = (time / 14000) * 100;
               progressBar.value = percentage;
   
-              if (time >= 17000) {
-                  clearInterval(interval); // Stop progress at 100%
+              if (time >= 14000) 
+              {
+                  clearInterval(interval);
+                  setTimeout(() => {
+                    container.style.transition = "opacity 0.5s ease-out";
+                    container.style.opacity = "0"; // Start fade-out animation
+          
+                    // Hide container completely after animation completes
+                    setTimeout(() => {
+                      container.style.display = "none";
+                    }, 250); // Match transition duration
+                  }, 250);
               }
           }, 500);
   
-          let container = document.querySelector(".container");
-          container.style.transition = "all 0.5s ease-in-out"; // Smooth animation
           container.style.minHeight = "650px";
-          return true;
       });
-    });  
-
-    function showImageModal(imgSrc) {
+  
+      // 🔍 Click-to-Zoom for Images
+      let images = document.querySelectorAll(".gradcam-image, .shap-image, .lime-image");
       let modal = document.getElementById("imageModal");
       let modalImg = document.getElementById("modalImg");
-      modal.style.display = "block";
-      modalImg.src = imgSrc;
-    }
+      let closeBtn = document.querySelector(".close");
   
-    function closeModal() {
-      document.getElementById("imageModal").style.display = "none";
-    }
-  
-    document.addEventListener("DOMContentLoaded", function () {
-      let images = document.querySelectorAll(".gradcam-image, .shap-image, .lime-image"); 
       images.forEach(img => {
-        img.style.cursor = "pointer"; 
-        img.addEventListener("click", function () {
-          showImageModal(this.src);
+          img.style.cursor = "pointer";
+          img.addEventListener("click", function () {
+              modal.style.display = "flex";
+              modalImg.src = this.src;
+          });
+      });
+  
+      closeBtn.addEventListener("click", function () {
+          modal.style.display = "none";
+      });
+  
+      // Close modal when clicking outside image
+      modal.addEventListener("click", function (e) {
+          if (e.target === modal) {
+              modal.style.display = "none";
+          }
+      });
+
+      document.body.classList.add("fade-in");
+
+      document.querySelectorAll("a").forEach(link => {
+        link.addEventListener("click", function (event) {
+          event.preventDefault();
+          document.body.classList.add("fade-out");
+
+          setTimeout(() => {
+            window.location = this.href;
+          }, 500); // Adjust timing to match animation
         });
       });
+
+      document.body.style.opacity = "0";
+      document.body.style.visibility = "hidden";
+    
+      window.onload = function () {
+        document.body.style.visibility = "visible";
+        document.body.style.transition = "opacity 0.5s ease-in";
+        document.body.style.opacity = "1";
+      };
     });
+  
 
   </script>
 </body>

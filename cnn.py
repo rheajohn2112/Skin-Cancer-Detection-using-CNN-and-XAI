@@ -1,17 +1,13 @@
 import os
-import numpy as np
-import glob
 import torch
 import torch.nn as nn
-from torchvision.transforms import transforms
-from torch.utils.data import DataLoader
-from torch.optim import Adam
 import torchvision
 import pathlib
-import xgboost as xgb
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+from torchvision.transforms import transforms
+from torch.utils.data import DataLoader
 from torch.optim import SGD
+from sklearn.metrics import precision_score, recall_score
 
 # Check if GPU is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -21,18 +17,13 @@ transformer = transforms.Compose([
     transforms.Resize((150, 150)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
-    #transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-    #transforms.RandomRotation(15),
-    #transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), shear=10),
-    #transforms.RandomResizedCrop(150, scale=(0.8, 1.0)),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-    #transforms.RandomErasing(p=0.5, scale=(0.02, 0.1), ratio=(0.3, 3.3))
 ])
 
 # DataLoader
-train_path = '/projects/u2103179/testcase/Dataset/Train/'  # Train path
-test_path = '/projects/u2103179/testcase/Dataset/Test/'    # Test path
+train_path = '/projects/u2103179cse/Project/dataset/Train'  # Adjust paths accordingly
+test_path = '/projects/u2103179cse/Project/dataset/Train'
 
 train_loader = DataLoader(
     torchvision.datasets.ImageFolder(train_path, transform=transformer),
@@ -136,147 +127,101 @@ class ConvNet(nn.Module):
 # Initialize the model
 model = ConvNet(num_classes=num_classes).to(device)
 
-# Function to calculate accuracy
-def calculate_accuracy(loader, model):
+# Checkpoint Paths
+checkpoint_path = "model_checkpoint.pth"
+best_model_path = "best_model.pth"
+
+# Load Checkpoint if Exists
+start_epoch = 0
+best_accuracy = 0.0
+if os.path.exists(checkpoint_path):
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    start_epoch = checkpoint['epoch']
+    best_accuracy = checkpoint['best_accuracy']
+    print(f"Resuming training from epoch {start_epoch+1} with best accuracy {best_accuracy:.2f}%")
+
+# Function to Calculate Accuracy, Precision, and Recall
+def calculate_metrics(loader, model):
     model.eval()
     correct = 0
     total = 0
+    all_preds = []
+    all_labels = []
+    
     with torch.no_grad():
         for images, labels in loader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             _, predicted = torch.max(outputs, 1)
+            
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-    return correct / total * 100
-
-# TRAINING THE CNN MODEL WITH ADAMS OPTIMIZER
-'''def train_cnn(model, train_loader, num_epochs=50, learning_rate=0.0001, weight_decay=1e-05):
-    # Define loss and optimizer
-    criterion = nn.CrossEntropyLoss()
-    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+            
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
     
-    # Training loop
-    for epoch in range(num_epochs):
+    accuracy = correct / total * 100
+    precision = precision_score(all_labels, all_preds, average='weighted', zero_division=1)
+    recall = recall_score(all_labels, all_preds, average='weighted', zero_division=1)
+    
+    return accuracy, precision, recall
+
+# TRAINING FUNCTION WITH CHECKPOINTING & GRAPH PLOTTING
+def train_cnn(model, train_loader, num_epochs=50, learning_rate=0.01, momentum=0.9, weight_decay=1e-05):
+    criterion = nn.CrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
+    global best_accuracy
+    
+    train_acc_list = []
+    test_acc_list = []
+    
+    for epoch in range(start_epoch, num_epochs):
         model.train()
         running_loss = 0.0
+        
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
-            
-            # Forward pass
+            optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
-            
-            # Backward pass
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
             running_loss += loss.item()
         
-        # Calculate train and test accuracy
-        train_accuracy = calculate_accuracy(train_loader, model)
-        test_accuracy = calculate_accuracy(test_loader, model)
+        train_accuracy, train_precision, train_recall = calculate_metrics(train_loader, model)
+        test_accuracy, test_precision, test_recall = calculate_metrics(test_loader, model)
         
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}, "
-              f"Train Accuracy: {train_accuracy:.2f}%, Test Accuracy: {test_accuracy:.2f}%")
-    
-    # Save the trained model
-    torch.save(model.state_dict(), "trained_cnn_model.pth")
-    print("CNN model trained and saved.")
-
-# Train the CNN
-train_cnn(model, train_loader, num_epochs=50)'''
-# TRAINING THE CNN MODEL WITH SGD MOMENTUM
-def train_cnn(model, train_loader, num_epochs=50, learning_rate=0.01, momentum=0.9, weight_decay=1e-05, use_sgd=True):
-    # Define loss and optimizer
-    criterion = nn.CrossEntropyLoss()
-    if use_sgd:
-        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
-    else:
-        optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    
-    # Training loop
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
-            
-            # Forward pass
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            running_loss += loss.item()
+        train_acc_list.append(train_accuracy)
+        test_acc_list.append(test_accuracy)
         
-        # Calculate train and test accuracy
-        train_accuracy = calculate_accuracy(train_loader, model)
-        test_accuracy = calculate_accuracy(test_loader, model)
+        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}")
+        print(f"Train Acc: {train_accuracy:.2f}%, Precision: {train_precision:.2f}, Recall: {train_recall:.2f}")
+        print(f"Test Acc: {test_accuracy:.2f}%, Precision: {test_precision:.2f}, Recall: {test_recall:.2f}")
         
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader):.4f}, "
-              f"Train Accuracy: {train_accuracy:.2f}%, Test Accuracy: {test_accuracy:.2f}%")
+        # Save Checkpoint
+        torch.save({
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'best_accuracy': best_accuracy
+        }, checkpoint_path)
+        
+        # Save Best Model
+        if test_accuracy > best_accuracy:
+            best_accuracy = test_accuracy
+            torch.save(model.state_dict(), best_model_path)
+            print(f"Best model saved with accuracy: {best_accuracy:.2f}%")
     
-    # Save the trained model
-    torch.save(model.state_dict(), "trained_cnn_model_sgd.pth")
-    print("CNN model trained and saved using SGD with momentum.")
+    # Plot Accuracy Graph
+    epochs_range = range(start_epoch+1, num_epochs+1)
+    plt.figure()
+    plt.plot(epochs_range, train_acc_list, label='Train Accuracy')
+    plt.plot(epochs_range, test_acc_list, label='Test Accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy (%)')
+    plt.legend()
+    plt.savefig('accuracy_plot.png')
+    plt.show()
+    print("Training complete. Accuracy plot saved.")
 
-# Train the CNN with SGD momentum
-train_cnn(
-    model,
-    train_loader,
-    num_epochs=50,
-    learning_rate=0.01,  # Typical learning rate for SGD
-    momentum=0.9,  # Common momentum value
-    weight_decay=1e-05,
-    use_sgd=True  # Toggle between SGD and Adam
-)
-
-
-# LOAD THE TRAINED CNN MODEL FOR FEATURE EXTRACTION
-model.load_state_dict(torch.load("/projects/u2103179/CNN/trained_cnn_model.pth"))
-model.eval()
-
-# FEATURE EXTRACTION FUNCTION (Modified to Extract Flattened Features for XGBoost)
-def extract_features(loader, model):
-    model.eval()
-    features = []
-    labels = []
-    with torch.no_grad():
-        for images, label in loader:
-            images = images.to(device)
-            # Get features before the final fully connected layer
-            output = model.global_average_pooling(model.pool7(model.relu7(model.bn7(model.conv7(images)))))
-            feature = output.view(output.size(0), -1)  # Flatten features for XGBoost
-            features.append(feature.cpu().numpy())
-            labels.append(label.numpy())
-    return np.vstack(features), np.concatenate(labels)
-
-# Extract features using the trained CNN model
-train_features, train_labels = extract_features(train_loader, model)
-test_features, test_labels = extract_features(test_loader, model)
-
-# Split the extracted features for training and validation (optional)
-X_train, X_val, y_train, y_val = train_test_split(train_features, train_labels, test_size=0.2, random_state=42)
-
-# Train XGBoost Classifier
-xgb_model = xgb.XGBClassifier(
-    n_estimators=100,
-    max_depth=6,
-    learning_rate=0.01,
-    objective='multi:softmax',
-    num_class=num_classes,
-    use_label_encoder=False,
-    eval_metric='mlogloss'
-)
-
-xgb_model.fit(X_train, y_train)
-
-# Evaluate the model
-y_pred = xgb_model.predict(test_features)
-accuracy = accuracy_score(test_labels, y_pred)
-print(f'XGBoost Accuracy: {accuracy:.4f}')
+train_cnn(model, train_loader, num_epochs=50, learning_rate=0.01, momentum=0.9, weight_decay=1e-05)

@@ -10,10 +10,12 @@ import torch.nn.functional as F
 from lime.lime_image import LimeImageExplainer
 from sklearn.cluster import KMeans
 import shap
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 UPLOAD_FOLDER = './uploads'
-MODEL_PATH = './trained_cnn_model_sgd.pth'
+MODEL_PATH = './best_model.pth'
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -80,7 +82,7 @@ class ConvNet(nn.Module):
 # Load the Model
 num_classes = 2  # No. of classes in the dataset
 model = ConvNet(num_classes=num_classes)
-model.load_state_dict(torch.load(MODEL_PATH))
+model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
 model.eval()
 
 # Define Image Transformations
@@ -91,9 +93,22 @@ transformer = transforms.Compose([
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 ])
 
-def preprocess_image(image_path):
-    image = Image.open(image_path).convert('RGB')
-    return transformer(image).unsqueeze(0)
+def get_bounding_box_from_heatmap(heatmap, threshold=0.75):
+    heatmap = normalize_heatmap(heatmap)
+    mask = heatmap > np.percentile(heatmap, threshold * 100)
+    indices = np.argwhere(mask)
+    if len(indices) == 0:
+        return (0,0,10,10)
+    y_min, x_min = indices.min(axis=0)
+    y_max, x_max = indices.max(axis=0)
+    return (x_min, y_min, x_max, y_max)
+
+def compute_iou(boxA, boxB=(50, 50, 175, 175)):
+    xA, yA, xB, yB = max(boxA[0], boxB[0]), max(boxA[1], boxB[1]), min(boxA[2], boxB[2]), min(boxA[3], boxB[3])
+    interArea = max(0, xB - xA) * max(0, yB - yA)
+    boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+    boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+    return interArea / float(boxAArea + boxBArea - interArea + 1e-8)
 
 def normalize_heatmap(heatmap):
     heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
@@ -102,7 +117,7 @@ def normalize_heatmap(heatmap):
 def lime(file_path):
     image = cv2.imread(file_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = cv2.resize(image, (150, 150))  
+    image = cv2.resize(image, (224, 224))  
     
     explainer = LimeImageExplainer()
     def predict_fn(images):
@@ -115,7 +130,7 @@ def lime(file_path):
 def shap_gen(file_path):
     image = cv2.imread(file_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = cv2.resize(image, (150, 150)) 
+    image = cv2.resize(image, (224, 224)) 
      
     background = torch.randn((10, 3, 224, 224))
     image_tensor = transformer(image).unsqueeze(0)
@@ -157,7 +172,7 @@ def shap_gen(file_path):
 def gradcam(file_path, target_layer):
     image = cv2.imread(file_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = cv2.resize(image, (150, 150))  
+    image = cv2.resize(image, (224, 224))  
     
     image_tensor = transformer(image).unsqueeze(0)
     activations, gradients = {}, {}
@@ -181,7 +196,7 @@ def gradcam(file_path, target_layer):
     
     grad = gradients['value'].mean(dim=[2, 3], keepdim=True)
     cam = F.relu(grad * activations['value']).sum(dim=1).squeeze().detach().cpu().numpy()
-    return target_class, normalize_heatmap(cv2.resize(cam, (150, 150)))
+    return target_class, normalize_heatmap(cv2.resize(cam, (224, 224)))
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
@@ -204,6 +219,16 @@ def upload():
         predicted_class, gradcam_heatmap = gradcam(file_path, target_layer)     
         lime_heatmap = lime(file_path)
         shap_path = shap_gen(file_path)
+        
+        lime_box = get_bounding_box_from_heatmap(lime_heatmap)
+        #shap_box = get_bounding_box_from_heatmap(shap_heatmap)
+        gradcam_box = get_bounding_box_from_heatmap(gradcam_heatmap)
+        l_iou = compute_iou(lime_box)
+        g_iou = compute_iou(gradcam_box)
+        print("LIME Box:", lime_box)
+        print("Grad-CAM Box:", gradcam_box)
+        print(f"{g_iou:.3f}") 
+        print(f"{l_iou:.3f}") 
         
         # Open and resize the original image
         img = Image.open(file_path).resize((224, 224))  
@@ -234,6 +259,8 @@ def upload():
                                gradcam_image=gradcam_path,
                                lime_image=lime_path,
                                shap_image=shap_path,
+                               g_iou=g_iou,
+                               l_iou=l_iou,
                                file_path=file_path)
 
     except Exception as e:
