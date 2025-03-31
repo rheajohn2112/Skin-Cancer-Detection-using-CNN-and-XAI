@@ -11,11 +11,11 @@ from lime.lime_image import LimeImageExplainer
 from sklearn.cluster import KMeans
 import shap
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")   # To prevent matplot from running on different threads
 import matplotlib.pyplot as plt
 
 UPLOAD_FOLDER = './uploads'
-MODEL_PATH = './best_model.pth'
+MODEL_PATH = './best_model_cnn_3.pth'
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -120,9 +120,15 @@ def lime(file_path):
     image = cv2.resize(image, (224, 224))  
     
     explainer = LimeImageExplainer()
-    def predict_fn(images):
-        images = torch.stack([transformer(img) for img in images])
-        return model(images).detach().cpu().numpy()
+    #Perturbation function
+    def predict_fn(perturbed_images):
+        # Convert perturbed images to tensors and normalize
+        perturbed_tensors = [torch.tensor(img, dtype=torch.float32).permute(2, 0, 1) / 255.0 for img in perturbed_images]
+        perturbed_tensors = torch.stack(perturbed_tensors)  # Stack into batch format
+
+        with torch.no_grad():
+            predictions = model(perturbed_tensors)  # Get model predictions
+        return predictions.cpu().numpy()  # Convert to NumPy
     
     explanation = explainer.explain_instance(image, predict_fn, top_labels=1, hide_color=0, num_samples=1000)
     return normalize_heatmap(explanation.get_image_and_mask(explanation.top_labels[0])[1])
@@ -132,20 +138,19 @@ def shap_gen(file_path):
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = cv2.resize(image, (224, 224)) 
      
-    background = torch.randn((10, 3, 224, 224))
+    background = torch.randn((10, 3, 224, 224)) # Create dataset to estimate feature importance
     image_tensor = transformer(image).unsqueeze(0)
     
     explainer = shap.DeepExplainer(model, background)
     shap_values = explainer.shap_values(image_tensor)
     
     shap_values = np.array(shap_values[0])  # Use the SHAP values for the first class
-    input_image = image_tensor.cpu().numpy().transpose(0, 2, 3, 1)[0]  # Convert to NHWC format
+    input_image = image_tensor.cpu().numpy().transpose(0, 2, 3, 1)[0]  # Convert to NHWC format (Numpy Height Width Channels)
     shap_image = shap_values[0]
     
     # Sum across channels to match image dimensions
     shap_sum = np.sum(shap_image, axis=-1)
     
-    # Normalize SHAP values to enhance contrast
     shap_sum = (shap_sum - np.min(shap_sum)) / (np.max(shap_sum) - np.min(shap_sum))  # Normalize to [0, 1]
     shap_sum = shap_sum * 2 - 1  # Scale to [-1, 1] for a balanced red-blue colormap
     shap_sum[np.abs(shap_sum) < 0.05] = 0  # Filter out low SHAP values below threshold
@@ -179,23 +184,24 @@ def gradcam(file_path, target_layer):
 
     #Hooks for analyzing the thought process
     def forward_hook(module, input, output):
-        activations['value'] = output
+        activations['value'] = output   # Contains feature maps
 
     def backward_hook(module, grad_input, grad_output):
         gradients['value'] = grad_output[0]
 
-    handle1 = target_layer.register_forward_hook(forward_hook)
-    handle2 = target_layer.register_full_backward_hook(backward_hook)
+    handle1 = target_layer.register_forward_hook(forward_hook)  # Captures feature maps
+    handle2 = target_layer.register_full_backward_hook(backward_hook)   # Captures gradients
     
     output = model(image_tensor)
     target_class = torch.argmax(output, dim=1).item()
-    output[:, target_class].backward()
+    output[:, target_class].backward()  # Computes gradients w.r.t. target class
     
+    # Prevent memory leaks
     handle1.remove()
     handle2.remove()
     
     grad = gradients['value'].mean(dim=[2, 3], keepdim=True)
-    cam = F.relu(grad * activations['value']).sum(dim=1).squeeze().detach().cpu().numpy()
+    cam = F.relu(grad * activations['value']).sum(dim=1).squeeze().detach().cpu().numpy()   # Ensure positive contributions
     return target_class, normalize_heatmap(cv2.resize(cam, (224, 224)))
 
 @app.route('/uploads/<path:filename>')
@@ -220,15 +226,15 @@ def upload():
         lime_heatmap = lime(file_path)
         shap_path = shap_gen(file_path)
         
-        lime_box = get_bounding_box_from_heatmap(lime_heatmap)
-        #shap_box = get_bounding_box_from_heatmap(shap_heatmap)
-        gradcam_box = get_bounding_box_from_heatmap(gradcam_heatmap)
-        l_iou = compute_iou(lime_box)
-        g_iou = compute_iou(gradcam_box)
-        print("LIME Box:", lime_box)
-        print("Grad-CAM Box:", gradcam_box)
-        print(f"{g_iou:.3f}") 
-        print(f"{l_iou:.3f}") 
+        # lime_box = get_bounding_box_from_heatmap(lime_heatmap)
+        # #shap_box = get_bounding_box_from_heatmap(shap_heatmap)
+        # gradcam_box = get_bounding_box_from_heatmap(gradcam_heatmap)
+        # l_iou = compute_iou(lime_box)
+        # g_iou = compute_iou(gradcam_box)
+        # print("LIME Box:", lime_box)
+        # print("Grad-CAM Box:", gradcam_box)
+        # print(f"{g_iou:.3f}") 
+        # print(f"{l_iou:.3f}") 
         
         # Open and resize the original image
         img = Image.open(file_path).resize((224, 224))  
@@ -259,8 +265,8 @@ def upload():
                                gradcam_image=gradcam_path,
                                lime_image=lime_path,
                                shap_image=shap_path,
-                               g_iou=g_iou,
-                               l_iou=l_iou,
+                            #    g_iou=g_iou,
+                            #    l_iou=l_iou,
                                file_path=file_path)
 
     except Exception as e:

@@ -1,5 +1,10 @@
 run first
 test.py
-node_modules
 /uploads
 /Sample website
+best_inception_model.pth
+best_resnet50_model.pth
+app_inception.py
+best_inception_model3.pth
+best_model_cnn_3.pth
+best_resnet50_model3.pth

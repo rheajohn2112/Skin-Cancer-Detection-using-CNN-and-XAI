@@ -23,7 +23,7 @@
     }
     .container {
       background: white;
-      padding: 15px;
+      padding: 12px 12px 0px 12px;
       border-radius: 10px;
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
       max-width: 500px;
@@ -105,14 +105,15 @@
           max-height: 0px;
           overflow: hidden;
           transition: opacity 0.5s ease-in-out, max-height 0.5s ease-in-out;
-          margin-top: 15px;"
+          margin-top: 5px;
+          padding:10px"
       >
         <h5>Image Preview:</h5>
-        <img id="imagePreview" src="" alt="Image Preview" class="gradcam-image" />
+        <img id="imagePreview" src="" alt="Image Preview" class="og-image" />
       </div>
 
       <br>
-      <button type="submit" id="upload-btn" onclick="startProgressBar(event)">Upload</button>
+      <button type="submit" id="upload-btn" onclick="startProgressBar(event)" style="max-width: 95%;">Upload</button>
     </form>
 
   <progress id="progress-bar" value="0" max="100"></progress>
