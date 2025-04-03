@@ -76,15 +76,15 @@
 <body>
 
   <div id="root" class="container">
-    <a href="/">
+    <a href="/xception">
       <img src="{{ url_for('static', filename='no_bg.png') }}" class="logo rounded-circle">
     </a>
-    <h2>Skin Cancer Detection</h2>
+    <h2>Skin Cancer Detection using Xception</h2>
     <form action="/upload" method="POST" enctype="multipart/form-data">
       <div class="form-group">
         <label for="fileInput" class="custom-file-upload">
           <input type="file" id="fileInput" name="file1" hidden />
-          <input type="hidden" name="model_type" value="convnet">
+          <input type="hidden" name="model_type" value="xception">
           <i class="fas fa-upload"></i> Choose Image
         </label>
       </div>
@@ -117,7 +117,7 @@
       <button type="submit" id="upload-btn" onclick="startProgressBar(event)" style="max-width: 95%;">Upload</button>
     </form>
 
-    <progress id="progress-bar" value="0" max="100"></progress>
+  <progress id="progress-bar" value="0" max="100"></progress>
 
     {% if prediction %}
       <div class="alert alert-success mt-3" id="feedback">
@@ -127,23 +127,18 @@
 
     <div class="row mt-3">
       {% if gradcam_image %}
-        <div class="col-md-4 text-center">
+        <div class="col-md-6 text-center">
           <h5>Grad-CAM</h5>
           <img src="{{ gradcam_image }}" alt="Grad-CAM Result" class="gradcam-image img-fluid rounded border"/>
         </div>
       {% endif %}
       {% if lime_image %}
-        <div class="col-md-4 text-center">
+        <div class="col-md-6 text-center">
           <h5>LIME</h5>
           <img src="{{ lime_image }}" alt="LIME Result" class="lime-image img-fluid rounded border"/>
         </div>
       {% endif %}
-      {% if shap_image %}
-        <div class="col-md-4 text-center">
-          <h5>SHAP</h5>
-          <img src="{{ shap_image }}" alt="SHAP Result" class="shap-image img-fluid rounded border"/>
-        </div>
-      {% endif %}
+
     </div>
 
     {% if file_path %}
@@ -154,9 +149,10 @@
       <div class="alert alert-danger mt-3" id="feedback">{{ error }}</div>
     {% endif %}
 <br>
+    <a href="/" class="btn btn-secondary mt-3">Go to CNN</a>
     <a href="/inception" class="btn btn-secondary mt-3">Go to Inception</a>
-    <a href="/xception" class="btn btn-secondary mt-3">Go to Xception</a>
     <a href="/resnet" class="btn btn-secondary mt-3">Go to ResNET</a>
+
   </div>
 
   <div id="imageModal" class="modal" onclick="closeModal()">
@@ -207,10 +203,10 @@
           let time = 0;
           let interval = setInterval(() => {
               time += 500;
-              let percentage = (time / 24000) * 100;
+              let percentage = (time / 110000) * 100;
               progressBar.value = percentage;
   
-              if (time >= 24000) 
+              if (time >= 110000) 
               {
                   clearInterval(interval);
                   setTimeout(() => {

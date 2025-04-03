@@ -4,6 +4,7 @@ import torch
 from torchvision import transforms
 from PIL import Image
 import torch.nn as nn
+import torchvision.models as models
 import numpy as np
 import cv2
 import torch.nn.functional as F
@@ -13,9 +14,12 @@ import shap
 import matplotlib
 matplotlib.use("Agg")   # To prevent matplot from running on different threads
 import matplotlib.pyplot as plt
+from skimage.segmentation import slic
+import timm
+from torchvision.models import ResNet50_Weights
 
 UPLOAD_FOLDER = './uploads'
-MODEL_PATH = './best_model_cnn_3.pth'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -79,11 +83,30 @@ class ConvNet(nn.Module):
         x = self.fc(x)
         return x
 
-# Load the Model
-num_classes = 2  # No. of classes in the dataset
-model = ConvNet(num_classes=num_classes)
-model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
-model.eval()
+# Load the Models
+num_classes = 2
+convnet_model = ConvNet(num_classes)
+convnet_model.load_state_dict(torch.load("./best_model_cnn_3.pth", weights_only=True))
+convnet_model.eval()
+
+inception_model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1)
+inception_model.fc = nn.Linear(2048, num_classes)
+inception_model.AuxLogits.fc = nn.Linear(768, num_classes)
+inception_model.load_state_dict(torch.load("./best_inception_model3.pth", map_location=device, weights_only=True))
+inception_model = inception_model.to(device)
+inception_model.eval()
+
+xception_model = timm.create_model('xception', pretrained=False)
+xception_model.last_linear = torch.nn.Linear(2048, num_classes)  
+xception_model.load_state_dict(torch.load("best_xception_model3.pth", map_location=device, weights_only=True))
+xception_model = xception_model.to(device)
+xception_model.eval()
+
+resnet_model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+resnet_model.fc = torch.nn.Linear(resnet_model.fc.in_features, num_classes)
+resnet_model.load_state_dict(torch.load("best_resnet50_model3.pth", map_location=device, weights_only=True))
+resnet_model = resnet_model.to(device)
+resnet_model.eval()  # Set model to evaluation mode
 
 # Define Image Transformations
 transformer = transforms.Compose([
@@ -114,7 +137,7 @@ def normalize_heatmap(heatmap):
     heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
     return np.uint8(255 * heatmap)
 
-def lime(file_path):
+def lime(file_path, model):
     image = cv2.imread(file_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = cv2.resize(image, (224, 224))  
@@ -130,10 +153,13 @@ def lime(file_path):
             predictions = model(perturbed_tensors)  # Get model predictions
         return predictions.cpu().numpy()  # Convert to NumPy
     
-    explanation = explainer.explain_instance(image, predict_fn, top_labels=1, hide_color=0, num_samples=1000)
+    def segmentation_fn(image):
+        return slic(image, n_segments=50, compactness=10, sigma=1)
+
+    explanation = explainer.explain_instance(image, predict_fn, top_labels=1, hide_color=0, num_samples=1000, segmentation_fn=segmentation_fn)
     return normalize_heatmap(explanation.get_image_and_mask(explanation.top_labels[0])[1])
 
-def shap_gen(file_path):
+def shap_gen(file_path, model):
     image = cv2.imread(file_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = cv2.resize(image, (224, 224)) 
@@ -141,7 +167,7 @@ def shap_gen(file_path):
     background = torch.randn((10, 3, 224, 224)) # Create dataset to estimate feature importance
     image_tensor = transformer(image).unsqueeze(0)
     
-    explainer = shap.DeepExplainer(model, background)
+    explainer = shap.GradientExplainer(model, background)
     shap_values = explainer.shap_values(image_tensor)
     
     shap_values = np.array(shap_values[0])  # Use the SHAP values for the first class
@@ -155,6 +181,8 @@ def shap_gen(file_path):
     shap_sum = shap_sum * 2 - 1  # Scale to [-1, 1] for a balanced red-blue colormap
     shap_sum[np.abs(shap_sum) < 0.05] = 0  # Filter out low SHAP values below threshold
 
+    grayscale_image = np.dot(input_image[..., :3], [0.2989, 0.587, 0.114])  # Convert to grayscale
+    grayscale_image = np.stack([grayscale_image] * 3, axis=-1)  # Convert back to 3 channels for visualization
     # Lighten the input image for better visibility
     lightened_image = np.clip(input_image * 0.7 + 0.3, 0, 1)
 
@@ -174,7 +202,7 @@ def shap_gen(file_path):
     plt.close()
     return output_path
 
-def gradcam(file_path, target_layer):
+def gradcam(file_path, target_layer, model):
     image = cv2.imread(file_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = cv2.resize(image, (224, 224))  
@@ -208,8 +236,32 @@ def gradcam(file_path, target_layer):
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
+def gen_heatmap(file, img_path, heatmap, xai):
+    # Open and resize the original image
+    img = Image.open(img_path).resize((224, 224))  
+    img_np = np.array(img) 
+    
+    # Ensure heatmap has 3 channels and matches image size
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB) 
+    heatmap = cv2.resize(heatmap, img_np.shape[:2][::-1])
+    
+    # Create overlay
+    overlay = cv2.addWeighted(img_np, 0.5, heatmap, 0.5, 0)
+    
+    # Save and render the result
+    if xai == "gradcam":
+        path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
+    elif xai == "lime":
+        path = os.path.join(app.config['UPLOAD_FOLDER'], f"lime_{file.filename}")
+        
+    Image.fromarray(overlay).save(path)
+    
+    return path
+
 @app.route('/upload', methods=['POST'])
 def upload():
+        
     if 'file1' not in request.files or request.files['file1'].filename == '':
         flash("Please upload a file!", "warning")
         return redirect('/')
@@ -220,57 +272,130 @@ def upload():
     file.save(file_path)
     print(file_path)
 
-    try:
-        target_layer = model.conv7  # Use the final layer
-        predicted_class, gradcam_heatmap = gradcam(file_path, target_layer)     
-        lime_heatmap = lime(file_path)
-        shap_path = shap_gen(file_path)
-        
-        # lime_box = get_bounding_box_from_heatmap(lime_heatmap)
-        # #shap_box = get_bounding_box_from_heatmap(shap_heatmap)
-        # gradcam_box = get_bounding_box_from_heatmap(gradcam_heatmap)
-        # l_iou = compute_iou(lime_box)
-        # g_iou = compute_iou(gradcam_box)
-        # print("LIME Box:", lime_box)
-        # print("Grad-CAM Box:", gradcam_box)
-        # print(f"{g_iou:.3f}") 
-        # print(f"{l_iou:.3f}") 
-        
-        # Open and resize the original image
-        img = Image.open(file_path).resize((224, 224))  
-        img_np = np.array(img)      
+    model_type = request.form.get("model_type", "index")    # Get mdoel type from form, index is default
+    
+    if model_type == "convnet":
+        try:         
+            target_layer = convnet_model.conv7  # Use the final layer
+            predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, convnet_model)     
+            lime_heatmap = lime(file_path, convnet_model)
+            shap_path = shap_gen(file_path, convnet_model)
+            
+            # lime_box = get_bounding_box_from_heatmap(lime_heatmap)
+            # #shap_box = get_bounding_box_from_heatmap(shap_heatmap)
+            # gradcam_box = get_bounding_box_from_heatmap(gradcam_heatmap)
+            # l_iou = compute_iou(lime_box)
+            # g_iou = compute_iou(gradcam_box)
+            # print("LIME Box:", lime_box)
+            # print("Grad-CAM Box:", gradcam_box)
+            # print(f"{g_iou:.3f}") 
+            # print(f"{l_iou:.3f}") 
+            
+            gradcam_path = gen_heatmap(file, file_path, gradcam_heatmap, "gradcam")
+            lime_path = gen_heatmap(file, file_path, lime_heatmap, "lime")
+            return render_template('index.html', 
+                                prediction=f'Predicted class: {predicted_class}', 
+                                gradcam_image=gradcam_path,
+                                lime_image=lime_path,
+                                shap_image=shap_path,
+                                #    g_iou=g_iou,
+                                #    l_iou=l_iou,
+                                file_path=file_path)
 
-        # Ensure heatmap has 3 channels and matches image size
-        gradcam_heatmap = cv2.applyColorMap(gradcam_heatmap, cv2.COLORMAP_JET)
-        gradcam_heatmap = cv2.cvtColor(gradcam_heatmap, cv2.COLOR_BGR2RGB) 
-        gradcam_heatmap = cv2.resize(gradcam_heatmap, img_np.shape[:2][::-1])  
+        except Exception as e:
+            return f"An error occurred for CNN: {str(e)}"
+    elif model_type == "inception":
+        try:
 
-        lime_heatmap = cv2.applyColorMap(lime_heatmap, cv2.COLORMAP_JET)
-        lime_heatmap = cv2.cvtColor(lime_heatmap, cv2.COLOR_BGR2RGB) 
-        lime_heatmap = cv2.resize(lime_heatmap, img_np.shape[:2][::-1]) 
-         
-        # Create overlay
-        overlay = cv2.addWeighted(img_np, 0.5, gradcam_heatmap, 0.5, 0)
-        overlay2 = cv2.addWeighted(img_np, 0.5, lime_heatmap, 0.5, 0)
+            target_layer = inception_model.Mixed_7c  # Final convolutional block
+            predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, inception_model)
+            lime_heatmap = lime(file_path, inception_model)
+            shap_path = shap_gen(file_path, inception_model)
+            # Open and resize the original image
+                # img = Image.open(file_path).resize((224, 224))  
+                # img_np = np.array(img)      
 
-        # Save and render the Grad-CAM result
-        gradcam_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
-        lime_path = os.path.join(app.config['UPLOAD_FOLDER'], f"lime_{file.filename}")
+                # # Ensure heatmap has 3 channels and matches image size
+                # gradcam_heatmap = cv2.applyColorMap(gradcam_heatmap, cv2.COLORMAP_JET)
+                # gradcam_heatmap = cv2.cvtColor(gradcam_heatmap, cv2.COLOR_BGR2RGB) 
+                # gradcam_heatmap = cv2.resize(gradcam_heatmap, img_np.shape[:2][::-1]) 
+                
+                # lime_heatmap = cv2.applyColorMap(lime_heatmap, cv2.COLORMAP_JET)
+                # lime_heatmap = cv2.cvtColor(lime_heatmap, cv2.COLOR_BGR2RGB) 
+                # lime_heatmap = cv2.resize(lime_heatmap, img_np.shape[:2][::-1]) 
+                
+                # # Create overlay
+                # overlay = cv2.addWeighted(img_np, 0.5, gradcam_heatmap, 0.5, 0)
+                # overlay2 = cv2.addWeighted(img_np, 0.5, lime_heatmap, 0.5, 0)
+             # Save and render the Grad-CAM result
+                # gradcam_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
+                # lime_path = os.path.join(app.config['UPLOAD_FOLDER'], f"lime_{file.filename}")
+                # Image.fromarray(overlay).save(gradcam_path)
+                # Image.fromarray(overlay2).save(lime_path)
+            gradcam_path = gen_heatmap(file, file_path, gradcam_heatmap, "gradcam")
+            lime_path = gen_heatmap(file, file_path, lime_heatmap, "lime")
+            
+            return render_template('inception.html', 
+                                prediction=f'Predicted class: {predicted_class}', 
+                                gradcam_image=gradcam_path,
+                                lime_image=lime_path,
+                                shap_image=shap_path,
+                                #    g_iou=g_iou,
+                                #    l_iou=l_iou,
+                                file_path=file_path)
+        except Exception as e:
+            return f"An error occurred for Inception: {str(e)}"
+    elif model_type == "xception":
+        try:
 
-        Image.fromarray(overlay).save(gradcam_path)
-        Image.fromarray(overlay2).save(lime_path)
-        
-        return render_template('index.html', 
-                               prediction=f'Predicted class: {predicted_class}', 
-                               gradcam_image=gradcam_path,
-                               lime_image=lime_path,
-                               shap_image=shap_path,
-                            #    g_iou=g_iou,
-                            #    l_iou=l_iou,
-                               file_path=file_path)
+            target_layer = xception_model.conv3   # Final convolutional block
+            predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, xception_model)
+            lime_heatmap = lime(file_path, xception_model)
+            
+            gradcam_path = gen_heatmap(file, file_path, gradcam_heatmap, "gradcam")
+            lime_path = gen_heatmap(file, file_path, lime_heatmap, "lime")
+            
+            return render_template('xception.html', 
+                                prediction=f'Predicted class: {predicted_class}', 
+                                gradcam_image=gradcam_path,
+                                lime_image=lime_path,
+                                #    g_iou=g_iou,
+                                #    l_iou=l_iou,
+                                file_path=file_path)
+        except Exception as e:
+            return f"An error occurred for Xception: {str(e)}"
+    else:
+        try:
+            target_layer = resnet_model.layer4[-1]   # Final convolutional block
+            predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, resnet_model)
+            lime_heatmap = lime(file_path, resnet_model)
+            shap_path = shap_gen(file_path, resnet_model)
+            
+            gradcam_path = gen_heatmap(file, file_path, gradcam_heatmap, "gradcam")
+            lime_path = gen_heatmap(file, file_path, lime_heatmap, "lime")
+            
+            return render_template('resnet.html', 
+                                prediction=f'Predicted class: {predicted_class}', 
+                                gradcam_image=gradcam_path,
+                                lime_image=lime_path,
+                                shap_image=shap_path,
+                                #    g_iou=g_iou,
+                                #    l_iou=l_iou,
+                                file_path=file_path)
+        except Exception as e:
+            return f"An error occurred for ResNET50: {str(e)}"
+    
+@app.route('/inception')
+def inc():
+    return render_template('inception.html')
 
-    except Exception as e:
-        return f"An error occurred: {str(e)}"
+@app.route('/xception')
+def xcp():
+    return render_template('xception.html')
+
+@app.route('/resnet')
+def res():
+    return render_template('resnet.html')
 
 @app.route('/')
 def home():

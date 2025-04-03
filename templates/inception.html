@@ -76,15 +76,15 @@
 <body>
 
   <div id="root" class="container">
-    <a href="/">
+    <a href="/inception">
       <img src="{{ url_for('static', filename='no_bg.png') }}" class="logo rounded-circle">
     </a>
-    <h2>Skin Cancer Detection</h2>
+    <h2>Skin Cancer Detection using Inception</h2>
     <form action="/upload" method="POST" enctype="multipart/form-data">
       <div class="form-group">
         <label for="fileInput" class="custom-file-upload">
           <input type="file" id="fileInput" name="file1" hidden />
-          <input type="hidden" name="model_type" value="convnet">
+          <input type="hidden" name="model_type" value="inception">
           <i class="fas fa-upload"></i> Choose Image
         </label>
       </div>
@@ -117,7 +117,7 @@
       <button type="submit" id="upload-btn" onclick="startProgressBar(event)" style="max-width: 95%;">Upload</button>
     </form>
 
-    <progress id="progress-bar" value="0" max="100"></progress>
+  <progress id="progress-bar" value="0" max="100"></progress>
 
     {% if prediction %}
       <div class="alert alert-success mt-3" id="feedback">
@@ -154,9 +154,10 @@
       <div class="alert alert-danger mt-3" id="feedback">{{ error }}</div>
     {% endif %}
 <br>
-    <a href="/inception" class="btn btn-secondary mt-3">Go to Inception</a>
+    <a href="/" class="btn btn-secondary mt-3">Go to CNN</a>
     <a href="/xception" class="btn btn-secondary mt-3">Go to Xception</a>
     <a href="/resnet" class="btn btn-secondary mt-3">Go to ResNET</a>
+
   </div>
 
   <div id="imageModal" class="modal" onclick="closeModal()">
@@ -207,10 +208,10 @@
           let time = 0;
           let interval = setInterval(() => {
               time += 500;
-              let percentage = (time / 24000) * 100;
+              let percentage = (time / 104000) * 100;
               progressBar.value = percentage;
   
-              if (time >= 24000) 
+              if (time >= 104000) 
               {
                   clearInterval(interval);
                   setTimeout(() => {
