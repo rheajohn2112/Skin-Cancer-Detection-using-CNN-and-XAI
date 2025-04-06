@@ -6,21 +6,13 @@ This project aims to create an automated tool to help detect skin cancer early a
 
 # Tech Stack
 
-Python (Flask)
+Backend : Python/Flask, PyTorch
 
-HTML/CSS
+Frontend : HTML/CSS
 
-PyTorch
+Models : Convolution Neural Network, ResNet50, Inception_V3, Xception
 
-Convolution Neural Network
-
-ResNet50
-
-Inception_V3
-
-Xception
-
-
+Explainable AI : LIME, SHAP, Grad-CAM
 
 
 
