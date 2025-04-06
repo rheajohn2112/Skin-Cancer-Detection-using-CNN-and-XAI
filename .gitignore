@@ -11,3 +11,4 @@ best_resnet50_model3.pth
 best_xception_model3.pth
 app_resnet.py
 app_xception.py
+evaltest2.py

@@ -171,10 +171,10 @@ def shap_gen(file_path, model):
     shap_values = explainer.shap_values(image_tensor)
     
     shap_values = np.array(shap_values[0])  # Use the SHAP values for the first class
-    input_image = image_tensor.cpu().numpy().transpose(0, 2, 3, 1)[0]  # Convert to NHWC format (Numpy Height Width Channels)
+    input_image = image_tensor.cpu().numpy().transpose(0, 2, 3, 1)[0]  # Convert to NHWC format (Numpy Height Width Channels) from NCHW
     shap_image = shap_values[0]
     
-    # Sum across channels to match image dimensions
+    # Sum across the 3 channels to match image dimensions
     shap_sum = np.sum(shap_image, axis=-1)
     
     shap_sum = (shap_sum - np.min(shap_sum)) / (np.max(shap_sum) - np.min(shap_sum))  # Normalize to [0, 1]
@@ -272,7 +272,7 @@ def upload():
     file.save(file_path)
     print(file_path)
 
-    model_type = request.form.get("model_type", "index")    # Get mdoel type from form, index is default
+    model_type = request.form.get("model_type", "convnet")    # Get mdoel type from form, convnet is default
     
     if model_type == "convnet":
         try:         
@@ -298,8 +298,6 @@ def upload():
                                 gradcam_image=gradcam_path,
                                 lime_image=lime_path,
                                 shap_image=shap_path,
-                                #    g_iou=g_iou,
-                                #    l_iou=l_iou,
                                 file_path=file_path)
 
         except Exception as e:
@@ -311,27 +309,7 @@ def upload():
             predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, inception_model)
             lime_heatmap = lime(file_path, inception_model)
             shap_path = shap_gen(file_path, inception_model)
-            # Open and resize the original image
-                # img = Image.open(file_path).resize((224, 224))  
-                # img_np = np.array(img)      
 
-                # # Ensure heatmap has 3 channels and matches image size
-                # gradcam_heatmap = cv2.applyColorMap(gradcam_heatmap, cv2.COLORMAP_JET)
-                # gradcam_heatmap = cv2.cvtColor(gradcam_heatmap, cv2.COLOR_BGR2RGB) 
-                # gradcam_heatmap = cv2.resize(gradcam_heatmap, img_np.shape[:2][::-1]) 
-                
-                # lime_heatmap = cv2.applyColorMap(lime_heatmap, cv2.COLORMAP_JET)
-                # lime_heatmap = cv2.cvtColor(lime_heatmap, cv2.COLOR_BGR2RGB) 
-                # lime_heatmap = cv2.resize(lime_heatmap, img_np.shape[:2][::-1]) 
-                
-                # # Create overlay
-                # overlay = cv2.addWeighted(img_np, 0.5, gradcam_heatmap, 0.5, 0)
-                # overlay2 = cv2.addWeighted(img_np, 0.5, lime_heatmap, 0.5, 0)
-             # Save and render the Grad-CAM result
-                # gradcam_path = os.path.join(app.config['UPLOAD_FOLDER'], f"gradcam_{file.filename}")
-                # lime_path = os.path.join(app.config['UPLOAD_FOLDER'], f"lime_{file.filename}")
-                # Image.fromarray(overlay).save(gradcam_path)
-                # Image.fromarray(overlay2).save(lime_path)
             gradcam_path = gen_heatmap(file, file_path, gradcam_heatmap, "gradcam")
             lime_path = gen_heatmap(file, file_path, lime_heatmap, "lime")
             
@@ -340,15 +318,13 @@ def upload():
                                 gradcam_image=gradcam_path,
                                 lime_image=lime_path,
                                 shap_image=shap_path,
-                                #    g_iou=g_iou,
-                                #    l_iou=l_iou,
                                 file_path=file_path)
         except Exception as e:
             return f"An error occurred for Inception: {str(e)}"
     elif model_type == "xception":
         try:
 
-            target_layer = xception_model.conv3   # Final convolutional block
+            target_layer = xception_model.conv4   # Final convolutional block
             predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, xception_model)
             lime_heatmap = lime(file_path, xception_model)
             
@@ -359,13 +335,12 @@ def upload():
                                 prediction=f'Predicted class: {predicted_class}', 
                                 gradcam_image=gradcam_path,
                                 lime_image=lime_path,
-                                #    g_iou=g_iou,
-                                #    l_iou=l_iou,
                                 file_path=file_path)
         except Exception as e:
             return f"An error occurred for Xception: {str(e)}"
     else:
         try:
+            
             target_layer = resnet_model.layer4[-1]   # Final convolutional block
             predicted_class, gradcam_heatmap = gradcam(file_path, target_layer, resnet_model)
             lime_heatmap = lime(file_path, resnet_model)
@@ -379,8 +354,6 @@ def upload():
                                 gradcam_image=gradcam_path,
                                 lime_image=lime_path,
                                 shap_image=shap_path,
-                                #    g_iou=g_iou,
-                                #    l_iou=l_iou,
                                 file_path=file_path)
         except Exception as e:
             return f"An error occurred for ResNET50: {str(e)}"

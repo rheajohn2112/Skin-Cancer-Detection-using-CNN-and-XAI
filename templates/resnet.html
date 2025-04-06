@@ -207,10 +207,10 @@
           let time = 0;
           let interval = setInterval(() => {
               time += 500;
-              let percentage = (time / 149000) * 100;
+              let percentage = (time / 166000) * 100;
               progressBar.value = percentage;
   
-              if (time >= 69000) 
+              if (time >= 166000) 
               {
                   clearInterval(interval);
                   setTimeout(() => {
